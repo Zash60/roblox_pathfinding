@@ -1,340 +1,282 @@
 --[[
-    Script de Pathfinding A* com UI Mobile (VERSÃO CORRIGIDA)
-    Criado para executores como Delta
-
+    Script de Pathfinding A* com UI Mobile para Roblox Executors (Delta)
+    Criado por: Seu Assistente de IA
     Funcionalidades:
-    - Algoritmo A* para encontrar caminhos em uma grade.
-    - UI robusta e funcional para mobile.
-    - Set Start: Define o ponto de partida na sua posição atual.
-    - Set End: Define o ponto de chegada na sua posição atual.
-    - Start Pathfinding: Teleporta para o início e anda automaticamente até o fim.
-    - Visualização do caminho (pode ser desativada).
+    - UI Amigável para Mobile
+    - Set Start / Set End (Definir Início / Fim)
+    - Autowalk (Caminhada Automática) com botão de ligar/desligar
+    - Teleporte para o início ao começar
+    - Visualização opcional do caminho
 ]]
 
--- ================= CONFIGURAÇÕES =================
-local GRID_SIZE = 4 
-local VISUALIZE_PATH = true
-local CHARACTER_HEIGHT_OFFSET = 3
-local JUMP_DETECTION_HEIGHT = 5
+-- CONFIGURAÇÕES
+local VISUALIZE_PATH = true -- Mude para 'false' se não quiser ver as esferas do caminho
 
--- ================= VARIÁVEIS GLOBAIS =================
+-- SERVIÇOS E VARIÁVEIS GLOBAIS
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
+local PathfindingService = game:GetService("PathfindingService")
+local UserInputService = game:GetService("UserInputService")
 
-local localPlayer = Players.LocalPlayer
-local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
-local startPosition = nil
-local endPosition = nil
-local isPathfinding = false
-local visualizationFolder = nil
+local startPos, endPos = nil, nil
+local currentPath = nil
+local isAutowalking = true
+local isWalking = false
 
--- ================= ALGORITMO A* (A-STAR) =================
--- Esta seção permanece a mesma, pois a lógica de pathfinding está correta.
-local A_Star = {}
+-- FUNÇÃO PARA NOTIFICAÇÕES (Simples)
+local function notify(message)
+    local notificationGui = Instance.new("ScreenGui", player.PlayerGui)
+    notificationGui.Name = "NotificationGui"
+    notificationGui.ResetOnSpawn = false
 
-function A_Star:FindPath(startWorldPos, endWorldPos)
-    local function GetNodeFromPos(pos)
-        return Vector2.new(math.floor(pos.X / GRID_SIZE), math.floor(pos.Z / GRID_SIZE))
-    end
+    local label = Instance.new("TextLabel", notificationGui)
+    label.Size = UDim2.new(0.8, 0, 0.1, 0)
+    label.Position = UDim2.new(0.1, 0, -0.15, 0)
+    label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    label.BackgroundTransparency = 0.2
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 18
+    label.TextWrapped = true
+    label.Text = message
+    label.ZIndex = 10
 
-    local function GetWorldPosFromNode(node)
-        return Vector3.new(node.X * GRID_SIZE, startWorldPos.Y + CHARACTER_HEIGHT_OFFSET, node.Y * GRID_SIZE)
-    end
-
-    local function IsWalkable(node)
-        local worldPos = GetWorldPosFromNode(node)
-        
-        local rayOrigin = worldPos + Vector3.new(0, 50, 0)
-        local rayDir = Vector3.new(0, -100, 0)
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        raycastParams.FilterDescendantsInstances = {character}
-        
-        local rayResult = Workspace:Raycast(rayOrigin, rayDir, raycastParams)
-
-        if not rayResult or not rayResult.Instance.CanCollide then
-            return false
-        end
-        
-        local groundPos = rayResult.Position
-        
-        local partSize = Vector3.new(GRID_SIZE, JUMP_DETECTION_HEIGHT, GRID_SIZE)
-        local partCFrame = CFrame.new(Vector3.new(worldPos.X, groundPos.Y + partSize.Y / 2, worldPos.Z))
-        
-        local overlapParams = OverlapParams.new()
-        overlapParams.FilterType = Enum.RaycastFilterType.Blacklist
-        overlapParams.FilterDescendantsInstances = {character}
-
-        local tempPart = Instance.new("Part")
-        tempPart.Size = partSize
-        tempPart.CFrame = partCFrame
-        tempPart.Anchored = true
-        tempPart.CanCollide = false
-        tempPart.Transparency = 1
-        
-        local obstacles = Workspace:GetPartsInPart(tempPart, overlapParams)
-        tempPart:Destroy()
-        
-        return #obstacles == 0
-    end
-
-    local startNodePos = GetNodeFromPos(startWorldPos)
-    local endNodePos = GetNodeFromPos(endWorldPos)
-
-    local openSet = {}
-    local closedSet = {}
-    local nodes = {}
-    
-    local function GetNode(pos)
-        local key = tostring(pos)
-        if not nodes[key] then
-            nodes[key] = {
-                pos = pos,
-                gCost = math.huge,
-                hCost = math.huge,
-                fCost = math.huge,
-                parent = nil,
-                walkable = IsWalkable(pos)
-            }
-        end
-        return nodes[key]
-    end
-
-    local startNode = GetNode(startNodePos)
-    startNode.gCost = 0
-    startNode.hCost = (startNodePos - endNodePos).Magnitude
-    startNode.fCost = startNode.hCost
-    
-    table.insert(openSet, startNode)
-
-    while #openSet > 0 do
-        local currentNode = openSet[1]
-        local currentIndex = 1
-        for i, node in ipairs(openSet) do
-            if node.fCost < currentNode.fCost or (node.fCost == currentNode.fCost and node.hCost < currentNode.hCost) then
-                currentNode = node
-                currentIndex = i
-            end
-        end
-
-        table.remove(openSet, currentIndex)
-        closedSet[tostring(currentNode.pos)] = true
-
-        if currentNode.pos == endNodePos then
-            local path = {}
-            local temp = currentNode
-            while temp do
-                table.insert(path, 1, GetWorldPosFromNode(temp.pos))
-                temp = temp.parent
-            end
-            return path
-        end
-
-        for x = -1, 1 do
-            for y = -1, 1 do
-                if x == 0 and y == 0 then continue end
-
-                local neighborPos = currentNode.pos + Vector2.new(x, y)
-                if not closedSet[tostring(neighborPos)] then
-                    local neighborNode = GetNode(neighborPos)
-
-                    if not neighborNode.walkable then
-                        closedSet[tostring(neighborPos)] = true
-                        continue
-                    end
-
-                    local moveCost = currentNode.gCost + (Vector2.new(x, y)).Magnitude
-                    if moveCost < neighborNode.gCost then
-                        neighborNode.gCost = moveCost
-                        neighborNode.hCost = (neighborPos - endNodePos).Magnitude
-                        neighborNode.fCost = neighborNode.gCost + neighborNode.hCost
-                        neighborNode.parent = currentNode
-
-                        local inOpenSet = false
-                        for _, openNode in ipairs(openSet) do
-                            if openNode.pos == neighborPos then
-                                inOpenSet = true
-                                break
-                            end
-end
-                        if not inOpenSet then
-                            table.insert(openSet, neighborNode)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return nil
-end
-
--- ================= UI (INTERFACE DE USUÁRIO) - VERSÃO CORRIGIDA =================
--- Criamos a UI dentro de uma função para garantir que tudo seja carregado corretamente.
-
-local function CreateUI()
-    -- Destruir UI antiga se existir
-    if localPlayer.PlayerGui:FindFirstChild("PathfinderUI") then
-        localPlayer.PlayerGui.PathfinderUI:Destroy()
-    end
-
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "PathfinderUI"
-    screenGui.ResetOnSpawn = false
-
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0.3, 0, 0.25, 0)
-    mainFrame.Position = UDim2.new(0.02, 0, 0.5, 0)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    mainFrame.BackgroundTransparency = 0.3
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Draggable = true
-    mainFrame.Parent = screenGui
-
-    local corner = Instance.new("UICorner")
+    local corner = Instance.new("UICorner", label)
     corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = mainFrame
 
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, 0, 0.2, 0)
-    titleLabel.Text = "A* Pathfinding"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Font = Enum.Font.SourceSansBold
-    titleLabel.TextSize = 18
-    titleLabel.Parent = mainFrame
-
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(0.9, 0, 0.15, 0)
-    statusLabel.Position = UDim2.new(0.05, 0, 0.2, 0)
-    statusLabel.Text = "Status: Idle"
-    statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Font = Enum.Font.SourceSans
-    statusLabel.TextSize = 14
-    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statusLabel.Parent = mainFrame
-
-    local function createButton(text, position)
-        local button = Instance.new("TextButton")
-        button.Size = UDim2.new(0.9, 0, 0.18, 0)
-        button.Position = position
-        button.Text = text
-        button.BackgroundColor3 = Color3.fromRGB(80, 80, 150)
-        button.TextColor3 = Color3.new(1, 1, 1)
-        button.Font = Enum.Font.SourceSansBold
-        button.TextSize = 16
-        button.Parent = mainFrame
-        
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(0, 6)
-        btnCorner.Parent = button
-        
-        return button
-    end
-
-    local setStartButton = createButton("Set Start", UDim2.new(0.05, 0, 0.35, 0))
-    local setEndButton = createButton("Set End", UDim2.new(0.05, 0, 0.55, 0))
-    local startButton = createButton("Start Pathfinding", UDim2.new(0.05, 0, 0.75, 0))
-    
-    local stopButton = Instance.new("TextButton")
-    stopButton.Size = UDim2.new(0.15, 0, 0.15, 0)
-    stopButton.Position = UDim2.new(0.8, 0, 0.02, 0)
-    stopButton.Text = "X"
-    stopButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    stopButton.TextColor3 = Color3.new(1, 1, 1)
-    stopButton.Font = Enum.Font.SourceSansBold
-    stopButton.Parent = mainFrame
-
-    -- Conectar funções aos botões
-    setStartButton.MouseButton1Click:Connect(function()
-        startPosition = rootPart.Position
-        statusLabel.Text = "Start definido! Defina o fim."
-        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    label:TweenPosition(UDim2.new(0.1, 0, 0.05, 0), "Out", "Quad", 0.5, true)
+    wait(3)
+    label:TweenPosition(UDim2.new(0.1, 0, -0.15, 0), "In", "Quad", 0.5, true, function()
+        notificationGui:Destroy()
     end)
-
-    setEndButton.MouseButton1Click:Connect(function()
-        endPosition = rootPart.Position
-        statusLabel.Text = "End definido! Pronto para iniciar."
-        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    end)
-
-    startButton.MouseButton1Click:Connect(function()
-        if isPathfinding then return end
-        if not startPosition or not endPosition then
-            statusLabel.Text = "Defina Start e End primeiro!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            return
-        end
-
-        isPathfinding = true
-        startButton.Text = "Calculando..."
-        startButton.BackgroundColor3 = Color3.fromRGB(150, 80, 80)
-        
-        task.spawn(function()
-            rootPart.CFrame = CFrame.new(startPosition)
-            task.wait(0.2)
-            
-            statusLabel.Text = "Calculando caminho A*..."
-            local path = A_Star:FindPath(startPosition, endPosition)
-
-            if visualizationFolder then visualizationFolder:Destroy() end
-            visualizationFolder = Instance.new("Folder", Workspace)
-            visualizationFolder.Name = "PathVisualization"
-
-            if path then
-                statusLabel.Text = "Caminho encontrado! Andando..."
-                statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-                
-                for _, waypoint in ipairs(path) do
-                    if not isPathfinding then break end
-
-                    if VISUALIZE_PATH then
-                        local part = Instance.new("Part")
-                        part.Size = Vector3.new(1, 1, 1)
-                        part.Position = waypoint
-                        part.Anchored = true
-                        part.CanCollide = false
-                        part.BrickColor = BrickColor.new("Lime green")
-                        part.Material = Enum.Material.Neon
-                        part.Transparency = 0.5
-                        part.Parent = visualizationFolder
-                    end
-
-                    humanoid:MoveTo(waypoint)
-                    humanoid.MoveToFinished:Wait()
-                end
-                
-                if isPathfinding then
-                    statusLabel.Text = "Chegou ao destino!"
-                    statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                end
-            else
-                statusLabel.Text = "Nenhum caminho encontrado!"
-                statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            end
-            
-            isPathfinding = false
-            startButton.Text = "Start Pathfinding"
-            startButton.BackgroundColor3 = Color3.fromRGB(80, 80, 150)
-        end)
-    end)
-
-    stopButton.MouseButton1Click:Connect(function()
-        isPathfinding = false
-        humanoid:MoveTo(rootPart.Position)
-        screenGui:Destroy()
-        if visualizationFolder then
-            visualizationFolder:Destroy()
-        end
-    end)
-
-    -- Adicionar a UI ao jogador
-    screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 end
 
--- Iniciar a UI
-CreateUI()
+-- CRIAÇÃO DA INTERFACE (UI)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PathfindingUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 250)
+mainFrame.Position = UDim2.new(0, 10, 0.5, -125)
+mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderColor3 = Color3.fromRGB(200, 200, 200)
+mainFrame.BorderSizePixel = 1
+mainFrame.Draggable = true -- Permite arrastar a UI
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner", mainFrame)
+corner.CornerRadius = UDim.new(0, 12)
+
+local titleLabel = Instance.new("TextLabel", mainFrame)
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.Position = UDim2.new(0, 0, 0, 0)
+titleLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.Text = "Pathfinder A*"
+local titleCorner = Instance.new("UICorner", titleLabel)
+titleCorner.CornerRadius = UDim.new(0, 12)
+
+local function createButton(text, yPos)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -20, 0, 35)
+    button.Position = UDim2.new(0, 10, 0, yPos)
+    button.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Font = Enum.Font.SourceSans
+    button.TextSize = 16
+    button.Text = text
+    button.Parent = mainFrame
+    local btnCorner = Instance.new("UICorner", button)
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    return button
+end
+
+-- BOTÕES
+local setStartButton = createButton("[Set Start]", 40)
+local setEndButton = createButton("[Set End]", 80)
+local startPathButton = createButton("Start Pathfinding", 120)
+startPathButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0) -- Verde
+local autowalkButton = createButton("Autowalk: ON", 160)
+autowalkButton.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Verde claro
+
+local statusLabel = Instance.new("TextLabel", mainFrame)
+statusLabel.Size = UDim2.new(1, -20, 0, 40)
+statusLabel.Position = UDim2.new(0, 10, 0, 200)
+statusLabel.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+statusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+statusLabel.Font = Enum.Font.SourceSansLight
+statusLabel.TextSize = 14
+statusLabel.Text = "Status: Idle"
+statusLabel.TextWrapped = true
+local statusCorner = Instance.new("UICorner", statusLabel)
+statusCorner.CornerRadius = UDim.new(0, 8)
+
+-- LÓGICA DO PATHFINDING
+
+local pathVisualizationFolder = Instance.new("Folder", workspace)
+pathVisualizationFolder.Name = "PathVisualization"
+
+local function clearPathVisualization()
+    pathVisualizationFolder:ClearAllChildren()
+end
+
+local function visualizePath(path)
+    if not VISUALIZE_PATH then return end
+    clearPathVisualization()
+    for i, waypoint in ipairs(path:GetWaypoints()) do
+        local part = Instance.new("Part")
+        part.Shape = Enum.PartType.Ball
+        part.Material = Enum.Material.Neon
+        part.Size = Vector3.new(0.5, 0.5, 0.5)
+        part.Position = waypoint.Position
+        part.Anchored = true
+        part.CanCollide = false
+        part.Color = Color3.fromRGB(255, 255, 0) -- Amarelo
+        if i == 1 then
+            part.Color = Color3.fromRGB(0, 255, 0) -- Verde para o início
+        elseif i == #path:GetWaypoints() then
+            part.Color = Color3.fromRGB(255, 0, 0) -- Vermelho para o fim
+        end
+        part.Parent = pathVisualizationFolder
+    end
+end
+
+local function walkPath()
+    if not currentPath or currentPath.Status ~= Enum.PathStatus.Success then
+        statusLabel.Text = "Status: Caminho inválido ou não calculado."
+        isWalking = false
+        return
+    end
+
+    isWalking = true
+    local waypoints = currentPath:GetWaypoints()
+    visualizePath(currentPath)
+
+    for i, waypoint in ipairs(waypoints) do
+        if not isAutowalking or not isWalking then
+            statusLabel.Text = "Status: Caminhada pausada."
+            break
+        end
+
+        statusLabel.Text = string.format("Status: Andando para o ponto %d/%d", i, #waypoints)
+        
+        -- Se o ponto tiver uma ação de pulo, pule
+        if waypoint.Action == Enum.PathWaypointAction.Jump then
+            humanoid.Jump = true
+        end
+        
+        humanoid:MoveTo(waypoint.Position)
+        
+        -- Espera até que o personagem chegue ou o tempo se esgote
+        local timeOut = humanoid.WalkSpeed > 0 and (rootPart.Position - waypoint.Position).Magnitude / humanoid.WalkSpeed or 5
+        local success = pcall(function()
+            humanoid.MoveToFinished:Wait(timeOut + 2)
+        end)
+        
+        if not success then
+             -- Se o MoveToFinished não disparar (personagem preso), pare
+            statusLabel.Text = "Status: Personagem preso. Parando."
+            isWalking = false
+            break
+        end
+    end
+    
+    if isWalking then
+        statusLabel.Text = "Status: Destino alcançado!"
+    end
+    
+    isWalking = false
+    clearPathVisualization()
+end
+
+
+-- CONEXÕES DOS BOTÕES
+
+setStartButton.MouseButton1Click:Connect(function()
+    startPos = rootPart.Position
+    notify("Posição inicial definida!")
+    statusLabel.Text = "Início: Definido | Fim: Não definido"
+end)
+
+setEndButton.MouseButton1Click:Connect(function()
+    endPos = rootPart.Position
+    notify("Posição final definida!")
+    if startPos then
+        statusLabel.Text = "Início: Definido | Fim: Definido"
+    else
+        statusLabel.Text = "Início: Não definido | Fim: Definido"
+    end
+end)
+
+autowalkButton.MouseButton1Click:Connect(function()
+    isAutowalking = not isAutowalking
+    if isAutowalking then
+        autowalkButton.Text = "Autowalk: ON"
+        autowalkButton.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+        -- Se não estava andando, mas há um caminho, retoma
+        if not isWalking and currentPath then
+            walkPath()
+        end
+    else
+        autowalkButton.Text = "Autowalk: OFF"
+        autowalkButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        isWalking = false -- Força a parada da caminhada no próximo loop
+    end
+end)
+
+startPathButton.MouseButton1Click:Connect(function()
+    if isWalking then
+        notify("Já estou andando!")
+        return
+    end
+    
+    if not startPos or not endPos then
+        notify("Defina a posição inicial e final primeiro!")
+        return
+    end
+
+    statusLabel.Text = "Status: Calculando caminho..."
+    
+    -- Teleporta o personagem para o início
+    character:SetPrimaryPartCFrame(CFrame.new(startPos + Vector3.new(0, 3, 0))) -- Adiciona 3 studs no Y para não ficar preso no chão
+    wait(0.2)
+    
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 3,
+        AgentHeight = 6,
+        AgentCanJump = true
+    })
+
+    local success, err = pcall(function()
+        path:ComputeAsync(startPos, endPos)
+    end)
+
+    if not success or path.Status ~= Enum.PathStatus.Success then
+        statusLabel.Text = "Status: Não foi possível encontrar um caminho!"
+        notify("Erro: Não foi possível calcular a rota. O destino pode estar bloqueado.")
+        currentPath = nil
+        return
+    end
+    
+    currentPath = path
+    notify("Caminho calculado! Iniciando caminhada.")
+    
+    if isAutowalking then
+        -- Usa uma coroutine para não travar o script enquanto anda
+        coroutine.wrap(walkPath)()
+    else
+        statusLabel.Text = "Status: Caminho pronto. Ative o Autowalk."
+        visualizePath(currentPath)
+    end
+end)
+
+notify("Script de Pathfinding carregado!")
