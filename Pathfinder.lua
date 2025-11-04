@@ -1,282 +1,211 @@
---[[
-    Script de Pathfinding A* com UI Mobile para Roblox Executors (Delta)
-    Criado por: Seu Assistente de IA
-    Funcionalidades:
-    - UI Amigável para Mobile
-    - Set Start / Set End (Definir Início / Fim)
-    - Autowalk (Caminhada Automática) com botão de ligar/desligar
-    - Teleporte para o início ao começar
-    - Visualização opcional do caminho
-]]
+-- Roblox Lua Script for A* Pathfinding with Mobile UI
+-- This script assumes it's running in a Roblox environment (e.g., via Delta executor on mobile).
+-- It creates a simple UI for setting start and end positions, and autowalks using A* pathfinding.
+-- Note: This is a basic implementation. A* is grid-based for simplicity (assuming a flat world).
+-- Grid size and resolution can be adjusted.
 
--- CONFIGURAÇÕES
-local VISUALIZE_PATH = true -- Mude para 'false' se não quiser ver as esferas do caminho
-
--- SERVIÇOS E VARIÁVEIS GLOBAIS
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
-local startPos, endPos = nil, nil
-local currentPath = nil
-local isAutowalking = true
-local isWalking = false
-
--- FUNÇÃO PARA NOTIFICAÇÕES (Simples)
-local function notify(message)
-    local notificationGui = Instance.new("ScreenGui", player.PlayerGui)
-    notificationGui.Name = "NotificationGui"
-    notificationGui.ResetOnSpawn = false
-
-    local label = Instance.new("TextLabel", notificationGui)
-    label.Size = UDim2.new(0.8, 0, 0.1, 0)
-    label.Position = UDim2.new(0.1, 0, -0.15, 0)
-    label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    label.BackgroundTransparency = 0.2
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.Font = Enum.Font.SourceSansBold
-    label.TextSize = 18
-    label.TextWrapped = true
-    label.Text = message
-    label.ZIndex = 10
-
-    local corner = Instance.new("UICorner", label)
-    corner.CornerRadius = UDim.new(0, 8)
-
-    label:TweenPosition(UDim2.new(0.1, 0, 0.05, 0), "Out", "Quad", 0.5, true)
-    wait(3)
-    label:TweenPosition(UDim2.new(0.1, 0, -0.15, 0), "In", "Quad", 0.5, true, function()
-        notificationGui:Destroy()
-    end)
-end
-
--- CRIAÇÃO DA INTERFACE (UI)
+-- UI Setup (Mobile-friendly with large buttons)
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PathfindingUI"
-screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Name = "PathfindingUI"
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 200, 0, 250)
-mainFrame.Position = UDim2.new(0, 10, 0.5, -125)
-mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-mainFrame.BackgroundTransparency = 0.1
-mainFrame.BorderColor3 = Color3.fromRGB(200, 200, 200)
-mainFrame.BorderSizePixel = 1
-mainFrame.Draggable = true -- Permite arrastar a UI
-mainFrame.Active = true
-mainFrame.Parent = screenGui
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.3, 0, 0.4, 0)
+frame.Position = UDim2.new(0.7, 0, 0.6, 0)
+frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+frame.Parent = screenGui
 
-local corner = Instance.new("UICorner", mainFrame)
-corner.CornerRadius = UDim.new(0, 12)
+local setStartButton = Instance.new("TextButton")
+setStartButton.Size = UDim2.new(1, 0, 0.2, 0)
+setStartButton.Position = UDim2.new(0, 0, 0, 0)
+setStartButton.Text = "Set Start"
+setStartButton.Parent = frame
 
-local titleLabel = Instance.new("TextLabel", mainFrame)
-titleLabel.Size = UDim2.new(1, 0, 0, 30)
-titleLabel.Position = UDim2.new(0, 0, 0, 0)
-titleLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.Font = Enum.Font.SourceSansBold
-titleLabel.Text = "Pathfinder A*"
-local titleCorner = Instance.new("UICorner", titleLabel)
-titleCorner.CornerRadius = UDim.new(0, 12)
+local setEndButton = Instance.new("TextButton")
+setEndButton.Size = UDim2.new(1, 0, 0.2, 0)
+setEndButton.Position = UDim2.new(0, 0, 0.2, 0)
+setEndButton.Text = "Set End"
+setEndButton.Parent = frame
 
-local function createButton(text, yPos)
-    local button = Instance.new("TextButton")
-    button.Size = UDim2.new(1, -20, 0, 35)
-    button.Position = UDim2.new(0, 10, 0, yPos)
-    button.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    button.Font = Enum.Font.SourceSans
-    button.TextSize = 16
-    button.Text = text
-    button.Parent = mainFrame
-    local btnCorner = Instance.new("UICorner", button)
-    btnCorner.CornerRadius = UDim.new(0, 8)
-    return button
+local startButton = Instance.new("TextButton")
+startButton.Size = UDim2.new(1, 0, 0.2, 0)
+startButton.Position = UDim2.new(0, 0, 0.4, 0)
+startButton.Text = "Start Autowalk"
+startButton.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0.4, 0)
+statusLabel.Position = UDim2.new(0, 0, 0.6, 0)
+statusLabel.Text = "Status: Ready"
+statusLabel.Parent = frame
+
+-- Variables for start and end positions
+local startPos = nil
+local endPos = nil
+
+-- Simple A* Implementation
+-- Grid resolution (studs per cell)
+local GRID_SIZE = 4
+
+-- Node class for A*
+local Node = {}
+Node.__index = Node
+
+function Node.new(position, parent)
+    local self = setmetatable({}, Node)
+    self.position = position
+    self.parent = parent
+    self.g = 0  -- Cost from start
+    self.h = 0  -- Heuristic to end
+    self.f = 0  -- Total cost
+    return self
 end
 
--- BOTÕES
-local setStartButton = createButton("[Set Start]", 40)
-local setEndButton = createButton("[Set End]", 80)
-local startPathButton = createButton("Start Pathfinding", 120)
-startPathButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0) -- Verde
-local autowalkButton = createButton("Autowalk: ON", 160)
-autowalkButton.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Verde claro
-
-local statusLabel = Instance.new("TextLabel", mainFrame)
-statusLabel.Size = UDim2.new(1, -20, 0, 40)
-statusLabel.Position = UDim2.new(0, 10, 0, 200)
-statusLabel.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
-statusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-statusLabel.Font = Enum.Font.SourceSansLight
-statusLabel.TextSize = 14
-statusLabel.Text = "Status: Idle"
-statusLabel.TextWrapped = true
-local statusCorner = Instance.new("UICorner", statusLabel)
-statusCorner.CornerRadius = UDim.new(0, 8)
-
--- LÓGICA DO PATHFINDING
-
-local pathVisualizationFolder = Instance.new("Folder", workspace)
-pathVisualizationFolder.Name = "PathVisualization"
-
-local function clearPathVisualization()
-    pathVisualizationFolder:ClearAllChildren()
+-- Get grid key for position
+local function getGridKey(pos)
+    local x = math.floor(pos.X / GRID_SIZE)
+    local y = math.floor(pos.Y / GRID_SIZE)
+    local z = math.floor(pos.Z / GRID_SIZE)
+    return x .. "," .. y .. "," .. z
 end
 
-local function visualizePath(path)
-    if not VISUALIZE_PATH then return end
-    clearPathVisualization()
-    for i, waypoint in ipairs(path:GetWaypoints()) do
-        local part = Instance.new("Part")
-        part.Shape = Enum.PartType.Ball
-        part.Material = Enum.Material.Neon
-        part.Size = Vector3.new(0.5, 0.5, 0.5)
-        part.Position = waypoint.Position
-        part.Anchored = true
-        part.CanCollide = false
-        part.Color = Color3.fromRGB(255, 255, 0) -- Amarelo
-        if i == 1 then
-            part.Color = Color3.fromRGB(0, 255, 0) -- Verde para o início
-        elseif i == #path:GetWaypoints() then
-            part.Color = Color3.fromRGB(255, 0, 0) -- Vermelho para o fim
+-- Heuristic (Manhattan distance)
+local function heuristic(a, b)
+    return math.abs(a.X - b.X) + math.abs(a.Y - b.Y) + math.abs(a.Z - b.Z)
+end
+
+-- Get neighbors (assuming 6 directions: forward, back, left, right, up, down)
+local function getNeighbors(currentPos)
+    local directions = {
+        Vector3.new(GRID_SIZE, 0, 0),
+        Vector3.new(-GRID_SIZE, 0, 0),
+        Vector3.new(0, GRID_SIZE, 0),
+        Vector3.new(0, -GRID_SIZE, 0),
+        Vector3.new(0, 0, GRID_SIZE),
+        Vector3.new(0, 0, -GRID_SIZE)
+    }
+    local neighbors = {}
+    for _, dir in ipairs(directions) do
+        local neighborPos = currentPos + dir
+        -- Check if walkable (using Raycast to detect obstacles)
+        local ray = Ray.new(currentPos, dir)
+        local hit = workspace:FindPartOnRayWithIgnoreList(ray, {character})
+        if not hit then
+            table.insert(neighbors, neighborPos)
         end
-        part.Parent = pathVisualizationFolder
     end
+    return neighbors
 end
 
-local function walkPath()
-    if not currentPath or currentPath.Status ~= Enum.PathStatus.Success then
-        statusLabel.Text = "Status: Caminho inválido ou não calculado."
-        isWalking = false
+-- A* Algorithm
+local function aStar(start, goal)
+    local openSet = {}
+    local closedSet = {}
+    local startNode = Node.new(start, nil)
+    startNode.g = 0
+    startNode.h = heuristic(start, goal)
+    startNode.f = startNode.g + startNode.h
+    table.insert(openSet, startNode)
+
+    while #openSet > 0 do
+        -- Find lowest f node
+        table.sort(openSet, function(a, b) return a.f < b.f end)
+        local current = table.remove(openSet, 1)
+        local currentKey = getGridKey(current.position)
+
+        if (current.position - goal).Magnitude < GRID_SIZE then
+            -- Reconstruct path
+            local path = {}
+            while current do
+                table.insert(path, 1, current.position)
+                current = current.parent
+            end
+            return path
+        end
+
+        closedSet[currentKey] = true
+
+        for _, neighborPos in ipairs(getNeighbors(current.position)) do
+            local neighborKey = getGridKey(neighborPos)
+            if not closedSet[neighborKey] then
+                local tentativeG = current.g + (current.position - neighborPos).Magnitude
+                local neighborNode = Node.new(neighborPos, current)
+                neighborNode.g = tentativeG
+                neighborNode.h = heuristic(neighborPos, goal)
+                neighborNode.f = neighborNode.g + neighborNode.h
+
+                -- Check if already in openSet with higher g
+                local inOpen = false
+                for i, node in ipairs(openSet) do
+                    if getGridKey(node.position) == neighborKey then
+                        if tentativeG < node.g then
+                            openSet[i] = neighborNode
+                        end
+                        inOpen = true
+                        break
+                    end
+                end
+                if not inOpen then
+                    table.insert(openSet, neighborNode)
+                end
+            end
+        end
+    end
+    return nil  -- No path found
+end
+
+-- Autowalk function
+local function autowalk(path)
+    if not path then
+        statusLabel.Text = "Status: No path found"
         return
     end
-
-    isWalking = true
-    local waypoints = currentPath:GetWaypoints()
-    visualizePath(currentPath)
-
-    for i, waypoint in ipairs(waypoints) do
-        if not isAutowalking or not isWalking then
-            statusLabel.Text = "Status: Caminhada pausada."
-            break
-        end
-
-        statusLabel.Text = string.format("Status: Andando para o ponto %d/%d", i, #waypoints)
-        
-        -- Se o ponto tiver uma ação de pulo, pule
-        if waypoint.Action == Enum.PathWaypointAction.Jump then
-            humanoid.Jump = true
-        end
-        
-        humanoid:MoveTo(waypoint.Position)
-        
-        -- Espera até que o personagem chegue ou o tempo se esgote
-        local timeOut = humanoid.WalkSpeed > 0 and (rootPart.Position - waypoint.Position).Magnitude / humanoid.WalkSpeed or 5
-        local success = pcall(function()
-            humanoid.MoveToFinished:Wait(timeOut + 2)
-        end)
-        
-        if not success then
-             -- Se o MoveToFinished não disparar (personagem preso), pare
-            statusLabel.Text = "Status: Personagem preso. Parando."
-            isWalking = false
-            break
-        end
+    statusLabel.Text = "Status: Walking..."
+    for i = 2, #path do  -- Start from 2 since 1 is current pos
+        humanoid:MoveTo(path[i])
+        humanoid.MoveToFinished:Wait()
     end
-    
-    if isWalking then
-        statusLabel.Text = "Status: Destino alcançado!"
-    end
-    
-    isWalking = false
-    clearPathVisualization()
+    statusLabel.Text = "Status: Arrived"
 end
 
-
--- CONEXÕES DOS BOTÕES
-
+-- Button Connections
 setStartButton.MouseButton1Click:Connect(function()
     startPos = rootPart.Position
-    notify("Posição inicial definida!")
-    statusLabel.Text = "Início: Definido | Fim: Não definido"
+    statusLabel.Text = "Status: Start set at " .. tostring(startPos)
 end)
 
 setEndButton.MouseButton1Click:Connect(function()
     endPos = rootPart.Position
-    notify("Posição final definida!")
-    if startPos then
-        statusLabel.Text = "Início: Definido | Fim: Definido"
-    else
-        statusLabel.Text = "Início: Não definido | Fim: Definido"
-    end
+    statusLabel.Text = "Status: End set at " .. tostring(endPos)
 end)
 
-autowalkButton.MouseButton1Click:Connect(function()
-    isAutowalking = not isAutowalking
-    if isAutowalking then
-        autowalkButton.Text = "Autowalk: ON"
-        autowalkButton.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-        -- Se não estava andando, mas há um caminho, retoma
-        if not isWalking and currentPath then
-            walkPath()
-        end
-    else
-        autowalkButton.Text = "Autowalk: OFF"
-        autowalkButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        isWalking = false -- Força a parada da caminhada no próximo loop
-    end
-end)
-
-startPathButton.MouseButton1Click:Connect(function()
-    if isWalking then
-        notify("Já estou andando!")
-        return
-    end
-    
+startButton.MouseButton1Click:Connect(function()
     if not startPos or not endPos then
-        notify("Defina a posição inicial e final primeiro!")
+        statusLabel.Text = "Status: Set start and end first"
         return
     end
-
-    statusLabel.Text = "Status: Calculando caminho..."
+    -- Teleport to start
+    rootPart.CFrame = CFrame.new(startPos)
+    wait(0.5)  -- Brief wait for teleport to settle
     
-    -- Teleporta o personagem para o início
-    character:SetPrimaryPartCFrame(CFrame.new(startPos + Vector3.new(0, 3, 0))) -- Adiciona 3 studs no Y para não ficar preso no chão
-    wait(0.2)
+    -- Compute path with A*
+    statusLabel.Text = "Status: Computing path..."
+    local path = aStar(startPos, endPos)
     
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 3,
-        AgentHeight = 6,
-        AgentCanJump = true
-    })
-
-    local success, err = pcall(function()
-        path:ComputeAsync(startPos, endPos)
-    end)
-
-    if not success or path.Status ~= Enum.PathStatus.Success then
-        statusLabel.Text = "Status: Não foi possível encontrar um caminho!"
-        notify("Erro: Não foi possível calcular a rota. O destino pode estar bloqueado.")
-        currentPath = nil
-        return
-    end
-    
-    currentPath = path
-    notify("Caminho calculado! Iniciando caminhada.")
-    
-    if isAutowalking then
-        -- Usa uma coroutine para não travar o script enquanto anda
-        coroutine.wrap(walkPath)()
-    else
-        statusLabel.Text = "Status: Caminho pronto. Ative o Autowalk."
-        visualizePath(currentPath)
-    end
+    -- Autowalk
+    autowalk(path)
 end)
 
-notify("Script de Pathfinding carregado!")
+-- Note: This is a simplified A* for demonstration. In a real game, consider using Roblox's PathfindingService for better performance.
+-- Adjust GRID_SIZE for accuracy vs performance. This assumes no obstacles above/below; extend for full 3D if needed.
