@@ -1,6 +1,6 @@
--- =============================================================================
+-- = a===========================================================================
 -- Script de Pathfinding para Roblox com UI Móvel Avançada
--- VERSÃO CORRIGIDA: Lógica de pulo precisa, esperando o personagem se aproximar da beirada.
+-- VERSÃO AUTOMATIZADA: Escaneia o mapa para identificar e evitar blocos de dano.
 -- =============================================================================
 
 -- Serviços do Roblox
@@ -21,13 +21,56 @@ local endPos = nil
 local isWalking = false
 local isSettingEnd = false
 
--- Configurações do Agente de Pathfinding
+-- =============================================================================
+--                NOVA CONFIGURAÇÃO AUTOMÁTICA DE PERIGOS
+-- =============================================================================
+-- Nomes comuns para partes que causam dano. Adicione mais se necessário.
+local DANGEROUS_PART_NAMES = {"kill", "lava", "damage", "acid", "insta"}
+
+-- Configurações do Agente de Pathfinding com CUSTOS para evitar perigos
 local AGENT_PARAMS = {
     AgentRadius = 2.5,
     AgentHeight = 6,
     AgentCanJump = true,
-    WaypointSpacing = 2
+    WaypointSpacing = 2,
+    Costs = {
+        DangerZone = math.huge -- Custo infinito para qualquer coisa marcada como "DangerZone"
+    }
 }
+
+-- Esta função escaneia o workspace e prepara as partes perigosas para o pathfinding
+local function setupPathfindingModifiers()
+    print("Pathfinder: Scanning workspace for dangerous parts...")
+    for _, part in ipairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local partNameLower = part.Name:lower()
+            local isDangerous = false
+            
+            for _, dangerName in ipairs(DANGEROUS_PART_NAMES) do
+                if partNameLower:match(dangerName) then
+                    isDangerous = true
+                    break
+                end
+            end
+
+            if isDangerous then
+                -- 1. Torna a parte não-colidível para que o pathfinder veja um caminho através dela.
+                part.CanCollide = false
+                
+                -- 2. Adiciona um modificador para dizer ao pathfinder que esta área é "cara".
+                if not part:FindFirstChildOfClass("PathfindingModifier") then
+                    local modifier = Instance.new("PathfindingModifier")
+                    modifier.Label = "DangerZone" -- Corresponde à chave na tabela Costs
+                    modifier.Parent = part
+                    print("Pathfinder: Tagged", part:GetFullName(), "as a DangerZone.")
+                end
+            end
+        end
+    end
+    print("Pathfinder: Scan complete.")
+end
+-- =============================================================================
+
 
 -- Pasta para visuais do caminho
 local pathVisualsFolder = workspace:FindFirstChild("PathVisuals") or Instance.new("Folder")
@@ -36,6 +79,7 @@ pathVisualsFolder.Parent = workspace
 
 -- =============================================================================
 -- SETUP DA INTERFACE DE USUÁRIO (UI)
+-- (Nenhuma mudança nesta seção)
 -- =============================================================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PathfindingUI"
@@ -110,6 +154,7 @@ statusLabel.Parent = mainContainer
 
 -- =============================================================================
 -- LÓGICA DO PATHFINDING E VISUALIZAÇÃO
+-- (Nenhuma mudança nesta seção)
 -- =============================================================================
 
 local function visualizePath(waypoints)
@@ -139,7 +184,8 @@ local function computePath(startVec, endVec)
 end
 
 -- =============================================================================
--- LÓGICA DE MOVIMENTO (AUTOWALK COM PULOS CORRIGIDO E PRECISO)
+-- LÓGICA DE MOVIMENTO (AUTOWALK COM PULOS PRECISOS)
+-- (Nenhuma mudança nesta seção)
 -- =============================================================================
 
 local function autowalk(waypoints)
@@ -154,42 +200,30 @@ local function autowalk(waypoints)
     for i = 2, #waypoints do
         if not isWalking then
             statusLabel.Text = "Status: Stopped by user"
-            humanoid:MoveTo(rootPart.Position) -- Para o movimento atual
+            humanoid:MoveTo(rootPart.Position)
             break
         end
 
         local waypoint = waypoints[i]
         
-        -- Inicia o movimento para o próximo ponto
         humanoid:MoveTo(waypoint.Position)
         
-        -- ===========================================================================
-        --                NOVO SISTEMA DE PULO PRECISO
-        -- ===========================================================================
-        -- Se o waypoint atual exige um pulo, nós não pulamos imediatamente.
-        -- Em vez disso, esperamos até que o personagem esteja perto o suficiente da beirada.
         if waypoint.Action == Enum.PathWaypointAction.Jump then
             statusLabel.Text = "Status: Approaching jump..."
             
-            -- Espera até que a distância horizontal até o ponto de pulo seja pequena
-            -- O "4" é um bom valor inicial, pode ser ajustado se necessário.
             while (rootPart.Position - waypoint.Position).Magnitude > 4 do
-                if not isWalking then break end -- Permite que o botão de parar funcione durante a espera
-                RunService.Heartbeat:Wait() -- Espera um único frame, mais preciso que task.wait()
+                if not isWalking then break end
+                RunService.Heartbeat:Wait()
             end
             
-            -- Se o usuário não cancelou, força o estado de pulo agora que estamos na beirada
             if isWalking then
                 statusLabel.Text = "Status: Jumping!"
                 humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
             end
         end
-        -- ===========================================================================
-
-        -- Espera a conclusão do movimento (seja andar ou o pulo)
+        
         local success = humanoid.MoveToFinished:Wait(10)
 
-        -- Se MoveTo demorou mais de 10 segundos e ainda estávamos andando, algo bloqueou o caminho.
         if not success and isWalking then
             statusLabel.Text = "Status: Path blocked. Stopping."
             isWalking = false
@@ -207,6 +241,7 @@ end
 
 -- =============================================================================
 -- CONEXÕES DOS BOTÕES E EVENTOS
+-- (Nenhuma mudança nesta seção)
 -- =============================================================================
 
 local isMinimized = false
@@ -235,7 +270,6 @@ startButton.MouseButton1Click:Connect(function()
         statusLabel.Text = "Status: Set start and end points first!"
         return
     end
-    -- Teleporta para o início para garantir consistência
     rootPart.CFrame = CFrame.new(startPos + Vector3.new(0, 3, 0))
     task.wait(0.5)
     
@@ -284,24 +318,24 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
     end
 end)
 
--- Função para configurar o personagem
 local function onCharacterAdded(newCharacter)
     character = newCharacter
     humanoid = newCharacter:WaitForChild("Humanoid")
     rootPart = newCharacter:WaitForChild("HumanoidRootPart")
     
-    -- Se o personagem morrer, pare o autowalk
     humanoid.Died:Connect(function()
         isWalking = false
         pathVisualsFolder:ClearAllChildren()
     end)
 end
 
--- Conecta a função ao evento de personagem adicionado
 player.CharacterAdded:Connect(onCharacterAdded)
--- Se o personagem já existir quando o script rodar, configura-o
 if player.Character then
     onCharacterAdded(player.Character)
 end
 
-print("Advanced Pathfinder script (Precise Jump Fix) loaded successfully.")
+-- =============================================================================
+--                EXECUTA O ESCANEAMENTO INICIAL
+-- =============================================================================
+setupPathfindingModifiers()
+print("Automated Pathfinder (Danger Scan + Precise Jump) loaded successfully.")
