@@ -1,15 +1,18 @@
--- Roblox Lua Script for A* Pathfinding with Mobile UI
--- VERSÃO MELHORADA: UI Arrastável/Minimizável, Visualização de Caminho e Sistema de Pulos para Obby.
+-- =============================================================================
+-- Script de Pathfinding para Roblox com UI Móvel Avançada
+-- Versão Final: Completo, com pulos automáticos, UI arrastável e visualização.
+-- =============================================================================
 
+-- Serviços do Roblox
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 local UserInputService = game:GetService("UserInputService")
 
--- Variáveis do Jogador
+-- Variáveis do Jogador (serão atualizadas no respawn)
 local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local rootPart = character:WaitForChild("HumanoidRootPart")
+local character
+local humanoid
+local rootPart
 
 -- Variáveis de Estado
 local startPos = nil
@@ -17,34 +20,31 @@ local endPos = nil
 local isWalking = false
 local isSettingEnd = false
 
--- Configurações
+-- Configurações do Agente de Pathfinding (personagem)
 local AGENT_PARAMS = {
-    AgentRadius = 2.5,
-    AgentHeight = 6,
-    AgentCanJump = true,
-    WaypointSpacing = 4, -- Um pouco mais espaçado ajuda a suavizar o caminho
-    Costs = {
-        Walkable = 1,
-        Jump = 5 -- Podemos tornar pulos mais "caros" para o pathfinder evitar se possível
-    }
+    AgentRadius = 2.5,   -- Largura do personagem
+    AgentHeight = 6,     -- Altura do personagem
+    AgentCanJump = true, -- ESSENCIAL: Permite que o pathfinder planeje pulos
+    WaypointSpacing = 4  -- Distância entre os pontos do caminho
 }
 
--- Pasta para guardar os visuais do caminho
-local pathVisualsFolder = Instance.new("Folder")
+-- Pasta para guardar os visuais do caminho no mundo
+local pathVisualsFolder = workspace:FindFirstChild("PathVisuals") or Instance.new("Folder")
 pathVisualsFolder.Name = "PathVisuals"
 pathVisualsFolder.Parent = workspace
 
---============================================================================--
--- SETUP DA INTERFACE (UI)
---============================================================================--
+-- =============================================================================
+-- SETUP DA INTERFACE DE USUÁRIO (UI)
+-- =============================================================================
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Parent = player:WaitForChild("PlayerGui")
 screenGui.Name = "PathfindingUI"
+screenGui.ResetOnSpawn = false -- Para a UI não resetar a posição no respawn
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
 frame.Size = UDim2.new(0, 200, 0, 250)
-frame.Position = UDim2.new(0.7, 0, 0.5, 0)
+frame.Position = UDim2.new(0.8, -200, 0.5, -125)
 frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 frame.BorderSizePixel = 0
 frame.Draggable = true -- Habilita o arrasto do Frame
@@ -108,20 +108,21 @@ statusLabel.BackgroundTransparency = 1
 statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 statusLabel.Parent = mainContainer
 
---============================================================================--
+-- =============================================================================
 -- LÓGICA DO PATHFINDING E VISUALIZAÇÃO
---============================================================================--
+-- =============================================================================
 
 -- Visualiza o caminho com partes de neon
 local function visualizePath(waypoints)
     pathVisualsFolder:ClearAllChildren()
     if not waypoints then return end
 
-    for i, waypoint in ipairs(waypoints) do
+    for _, waypoint in ipairs(waypoints) do
         local part = Instance.new("Part")
         part.Size = Vector3.new(1, 1, 1)
         part.Position = waypoint.Position
-        part.Color = (waypoint.Action == Enum.PathWaypointAction.Jump) and Color3.new(1, 1, 0) or Color3.new(0, 1, 0) -- Amarelo para pulo, verde para andar
+        -- Amarelo para pulo, verde para andar
+        part.Color = (waypoint.Action == Enum.PathWaypointAction.Jump) and Color3.new(1, 1, 0) or Color3.new(0, 1, 0)
         part.Material = Enum.Material.Neon
         part.Anchored = true
         part.CanCollide = false
@@ -142,9 +143,9 @@ local function computePath(startVec, endVec)
     end
 end
 
---============================================================================--
+-- =============================================================================
 -- LÓGICA DE MOVIMENTO (AUTOWALK COM PULOS)
---============================================================================--
+-- =============================================================================
 
 local function autowalk(waypoints)
     if not waypoints or #waypoints < 2 then
@@ -164,20 +165,25 @@ local function autowalk(waypoints)
 
         local waypoint = waypoints[i]
         
-        -- SISTEMA DE PULOS PARA OBBY
+        -- SISTEMA DE PULO AUTOMÁTICO CORRIGIDO
         if waypoint.Action == Enum.PathWaypointAction.Jump then
-            statusLabel.Text = "Status: Preparing to jump..."
-            -- Vira na direção do pulo
-            rootPart.CFrame = CFrame.new(rootPart.Position, waypoint.Position)
-            task.wait(0.1)
-            humanoid.Jump = true -- Executa o pulo
-            statusLabel.Text = "Status: Jumping!"
+            local currentState = humanoid:GetState()
+            -- Só pula se estiver no chão para evitar pulos duplos
+            if currentState ~= Enum.HumanoidStateType.Jumping and currentState ~= Enum.HumanoidStateType.Freefall then
+                statusLabel.Text = "Status: Jumping!"
+                humanoid.Jump = true
+                -- CRÍTICO: Espera o personagem realmente sair do chão antes de continuar
+                humanoid.StateChanged:Wait()
+            end
         end
 
+        -- Guia o personagem para o próximo ponto (andando ou no ar)
         humanoid:MoveTo(waypoint.Position)
-        local success = humanoid.MoveToFinished:Wait(8) -- Timeout de 8s por ponto
+        
+        -- Espera o personagem chegar, com um timeout para evitar travamentos
+        local success = humanoid.MoveToFinished:Wait(10)
 
-        if not success then
+        if not success and isWalking then
             statusLabel.Text = "Status: Path blocked. Stopping."
             isWalking = false
             break
@@ -191,29 +197,23 @@ local function autowalk(waypoints)
     visualizePath(nil) -- Limpa a visualização ao chegar
 end
 
-
---============================================================================--
+-- =============================================================================
 -- CONEXÕES DOS BOTÕES E EVENTOS
---============================================================================--
+-- =============================================================================
 
 -- Lógica para Minimizar/Maximizar a UI
 local isMinimized = false
 local originalSize = frame.Size
 minimizeButton.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
-    if isMinimized then
-        mainContainer.Visible = false
-        frame.Size = UDim2.new(0, 200, 0, 30)
-        minimizeButton.Text = "+"
-    else
-        mainContainer.Visible = true
-        frame.Size = originalSize
-        minimizeButton.Text = "-"
-    end
+    mainContainer.Visible = not isMinimized
+    minimizeButton.Text = isMinimized and "+" or "-"
+    frame.Size = isMinimized and UDim2.new(0, 200, 0, 30) or originalSize
 end)
 
 -- Definir Ponto de Início
 setStartButton.MouseButton1Click:Connect(function()
+    if not rootPart then return end
     startPos = rootPart.Position
     statusLabel.Text = "Status: Start point set."
 end)
@@ -226,20 +226,19 @@ end)
 
 -- Iniciar o autowalk
 startButton.MouseButton1Click:Connect(function()
-    if isWalking then return end
+    if isWalking or not rootPart then return end
     if not startPos or not endPos then
         statusLabel.Text = "Status: Set start and end points first!"
         return
     end
 
-    -- Teleporta para o início e espera um pouco
-    rootPart.CFrame = CFrame.new(startPos)
+    rootPart.CFrame = CFrame.new(startPos + Vector3.new(0, 3, 0)) -- Teleporta um pouco acima para não ficar preso
     task.wait(0.5)
     
     statusLabel.Text = "Status: Computing path..."
     local waypoints = computePath(startPos, endPos)
     
-    visualizePath(waypoints) -- Mostra o caminho antes de começar a andar
+    visualizePath(waypoints)
     
     autowalk(waypoints)
 end)
@@ -263,13 +262,13 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
         raycastParams.FilterDescendantsInstances = {character, pathVisualsFolder}
         
         local ray = workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
-        local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
+        local result = workspace:Raycast(ray.Origin, ray.Direction * 1500, raycastParams)
         
         if result and result.Position then
             endPos = result.Position
             statusLabel.Text = "Status: End point set."
             
-            -- Visualizar o ponto final
+            -- Visualizar o ponto final com um marcador vermelho
             pathVisualsFolder:ClearAllChildren()
             local endMarker = Instance.new("Part")
             endMarker.Size = Vector3.new(3,3,3)
@@ -285,8 +284,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
     end
 end)
 
--- Lidar com a morte e respawn do personagem
-player.CharacterAdded:Connect(function(newCharacter)
+-- =============================================================================
+-- GERENCIAMENTO DO PERSONAGEM (MORTE E RESPAWN)
+-- =============================================================================
+local function onCharacterAdded(newCharacter)
     character = newCharacter
     humanoid = newCharacter:WaitForChild("Humanoid")
     rootPart = newCharacter:WaitForChild("HumanoidRootPart")
@@ -295,11 +296,11 @@ player.CharacterAdded:Connect(function(newCharacter)
         isWalking = false
         pathVisualsFolder:ClearAllChildren()
     end)
-end)
+end
 
-humanoid.Died:Connect(function()
-    isWalking = false
-    pathVisualsFolder:ClearAllChildren()
-end)
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then
+    onCharacterAdded(player.Character)
+end
 
-print("Pathfinder script loaded.")
+print("Advanced Pathfinder script loaded successfully.")
