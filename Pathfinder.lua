@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Script de Pathfinding para Roblox com UI Móvel Avançada
--- VERSÃO FINAL CORRIGIDA: Usa task.wait() para pulos, garantindo compatibilidade com mais jogos.
+-- VERSÃO CORRIGIDA: Removido task.wait() após pulo para permitir movimento durante o pulo. Usando ChangeState para forçar o pulo.
 -- =============================================================================
 
 -- Serviços do Roblox
@@ -165,16 +165,13 @@ local function autowalk(waypoints)
         -- ===========================================================================
         --                MUDANÇA CRÍTICA AQUI (NOVO SISTEMA DE PULO)
         -- ===========================================================================
+        humanoid:MoveTo(waypoint.Position)  -- Iniciar o movimento primeiro
         if waypoint.Action == Enum.PathWaypointAction.Jump then
             statusLabel.Text = "Status: Jumping!"
-            humanoid.Jump = true
-            -- EM VEZ DE ESPERAR POR UM EVENTO, NÓS ESPERAMOS UMA PEQUENA QUANTIDADE DE TEMPO.
-            -- Isso dá ao motor do jogo tempo para processar o pulo antes de ser cancelado.
-            task.wait(0.1) -- ou RunService.Heartbeat:Wait()
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)  -- Forçar o pulo imediatamente após iniciar o movimento
         end
         -- ===========================================================================
 
-        humanoid:MoveTo(waypoint.Position)
         local success = humanoid.MoveToFinished:Wait(10)
 
         if not success and isWalking then
