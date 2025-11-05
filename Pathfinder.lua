@@ -26,7 +26,7 @@ local AGENT_PARAMS = {
     AgentRadius = 2.5,
     AgentHeight = 6,
     AgentCanJump = true,
-    WaypointSpacing = 4
+    WaypointSpacing = 2
 }
 
 -- Pasta para visuais do caminho
