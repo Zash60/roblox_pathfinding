@@ -1,13 +1,13 @@
 -- =============================================================================
 -- Script de Pathfinding para Roblox com UI Móvel Avançada
--- VERSÃO CORRIGIDA: Removido task.wait() após pulo para permitir movimento durante o pulo. Usando ChangeState para forçar o pulo.
+-- VERSÃO CORRIGIDA: Lógica de pulo precisa, esperando o personagem se aproximar da beirada.
 -- =============================================================================
 
 -- Serviços do Roblox
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService") -- Adicionado para uma espera mais precisa
+local RunService = game:GetService("RunService")
 
 -- Variáveis do Jogador (serão atualizadas no respawn)
 local player = Players.LocalPlayer
@@ -37,7 +37,6 @@ pathVisualsFolder.Parent = workspace
 -- =============================================================================
 -- SETUP DA INTERFACE DE USUÁRIO (UI)
 -- =============================================================================
--- (Esta parte não mudou, está aqui para ser um código completo)
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PathfindingUI"
 screenGui.ResetOnSpawn = false
@@ -111,7 +110,6 @@ statusLabel.Parent = mainContainer
 
 -- =============================================================================
 -- LÓGICA DO PATHFINDING E VISUALIZAÇÃO
--- (Esta parte não mudou)
 -- =============================================================================
 
 local function visualizePath(waypoints)
@@ -141,7 +139,7 @@ local function computePath(startVec, endVec)
 end
 
 -- =============================================================================
--- LÓGICA DE MOVIMENTO (AUTOWALK COM PULOS CORRIGIDO)
+-- LÓGICA DE MOVIMENTO (AUTOWALK COM PULOS CORRIGIDO E PRECISO)
 -- =============================================================================
 
 local function autowalk(waypoints)
@@ -156,24 +154,42 @@ local function autowalk(waypoints)
     for i = 2, #waypoints do
         if not isWalking then
             statusLabel.Text = "Status: Stopped by user"
-            humanoid:MoveTo(rootPart.Position)
+            humanoid:MoveTo(rootPart.Position) -- Para o movimento atual
             break
         end
 
         local waypoint = waypoints[i]
         
+        -- Inicia o movimento para o próximo ponto
+        humanoid:MoveTo(waypoint.Position)
+        
         -- ===========================================================================
-        --                MUDANÇA CRÍTICA AQUI (NOVO SISTEMA DE PULO)
+        --                NOVO SISTEMA DE PULO PRECISO
         -- ===========================================================================
-        humanoid:MoveTo(waypoint.Position)  -- Iniciar o movimento primeiro
+        -- Se o waypoint atual exige um pulo, nós não pulamos imediatamente.
+        -- Em vez disso, esperamos até que o personagem esteja perto o suficiente da beirada.
         if waypoint.Action == Enum.PathWaypointAction.Jump then
-            statusLabel.Text = "Status: Jumping!"
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)  -- Forçar o pulo imediatamente após iniciar o movimento
+            statusLabel.Text = "Status: Approaching jump..."
+            
+            -- Espera até que a distância horizontal até o ponto de pulo seja pequena
+            -- O "4" é um bom valor inicial, pode ser ajustado se necessário.
+            while (rootPart.Position - waypoint.Position).Magnitude > 4 do
+                if not isWalking then break end -- Permite que o botão de parar funcione durante a espera
+                RunService.Heartbeat:Wait() -- Espera um único frame, mais preciso que task.wait()
+            end
+            
+            -- Se o usuário não cancelou, força o estado de pulo agora que estamos na beirada
+            if isWalking then
+                statusLabel.Text = "Status: Jumping!"
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
         end
         -- ===========================================================================
 
+        -- Espera a conclusão do movimento (seja andar ou o pulo)
         local success = humanoid.MoveToFinished:Wait(10)
 
+        -- Se MoveTo demorou mais de 10 segundos e ainda estávamos andando, algo bloqueou o caminho.
         if not success and isWalking then
             statusLabel.Text = "Status: Path blocked. Stopping."
             isWalking = false
@@ -191,7 +207,6 @@ end
 
 -- =============================================================================
 -- CONEXÕES DOS BOTÕES E EVENTOS
--- (Esta parte não mudou)
 -- =============================================================================
 
 local isMinimized = false
@@ -220,12 +235,19 @@ startButton.MouseButton1Click:Connect(function()
         statusLabel.Text = "Status: Set start and end points first!"
         return
     end
+    -- Teleporta para o início para garantir consistência
     rootPart.CFrame = CFrame.new(startPos + Vector3.new(0, 3, 0))
     task.wait(0.5)
+    
     statusLabel.Text = "Status: Computing path..."
     local waypoints = computePath(startPos, endPos)
     visualizePath(waypoints)
-    autowalk(waypoints)
+    
+    if waypoints then
+        autowalk(waypoints)
+    else
+        statusLabel.Text = "Status: Path calculation failed."
+    end
 end)
 
 stopButton.MouseButton1Click:Connect(function()
@@ -243,6 +265,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
         raycastParams.FilterDescendantsInstances = {character, pathVisualsFolder}
         local ray = workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
         local result = workspace:Raycast(ray.Origin, ray.Direction * 1500, raycastParams)
+        
         if result and result.Position then
             endPos = result.Position
             statusLabel.Text = "Status: End point set."
@@ -261,19 +284,24 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
     end
 end)
 
+-- Função para configurar o personagem
 local function onCharacterAdded(newCharacter)
     character = newCharacter
     humanoid = newCharacter:WaitForChild("Humanoid")
     rootPart = newCharacter:WaitForChild("HumanoidRootPart")
+    
+    -- Se o personagem morrer, pare o autowalk
     humanoid.Died:Connect(function()
         isWalking = false
         pathVisualsFolder:ClearAllChildren()
     end)
 end
 
+-- Conecta a função ao evento de personagem adicionado
 player.CharacterAdded:Connect(onCharacterAdded)
+-- Se o personagem já existir quando o script rodar, configura-o
 if player.Character then
     onCharacterAdded(player.Character)
 end
 
-print("Advanced Pathfinder script (Jump Fixed) loaded successfully.")
+print("Advanced Pathfinder script (Precise Jump Fix) loaded successfully.")
